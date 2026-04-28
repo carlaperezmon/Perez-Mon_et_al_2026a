@@ -440,7 +440,7 @@ cut_val_all=c(0.22,10.5,0.94,1.35, #1 for hydro if removing all outliers, 1.35 f
               0.8,0.8,0.38,9.3,
               0,0.365,58) #0.8 for caco3, 42 if leaving outlier for XRD
 y_shift_bars=c(-0.75,-5.5,-0.6,-0.3,
-               -0.6,-0.6,-0.6,-1.6,
+               -0.6,-0.6,-1,-1.6,
                -0.75,-0.75,-20)
 
 ## probably better to not include weight in the morphological parameters
