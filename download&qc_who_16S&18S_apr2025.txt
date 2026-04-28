@@ -1,0 +1,59 @@
+######Analyses sequencing April 2025#########
+####Download sequences from Edinburgh genomics -> follow instructions from web & do QC ####
+
+qlogin -q staging
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/raw
+lftp transfer.genomics.ed.ac.uk <<<'login anonymous lftp@ ; mirror 459g4iLFchvyDRGO8rGQel6JgvftO7uq .'
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/raw/32800_Ogden_Rob/raw_data/20240902/
+
+md5sum -c md5sums.txt
+
+
+##Quality control of sequences with fastqc -> might skip since I do not know how reliable is this for double marker with same barcode...
+
+qlogin -l h_vmem=32G
+
+module load igmm/apps/FastQC/0.11.9
+
+#create quality files for forward and reverse reads separately
+
+zcat */*1.fastq.gz | fastqc stdin:allforward_fastqc #quality looks good for forward and reverse
+zcat */*2.fastq.gz | fastqc stdin:allreverse_fastqc
+
+
+##Create manifiest file for qiime
+
+#select who samples from the list of names in metadata file
+
+awk -F'\t' '{print $12}'  /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/metadata_who_falsified.txt> names.txt
+sed -i '1d' names.txt
+
+awk -F'\t' '{print $9}' file_list.tsv | uniq > sample-id.txt
+sed -i '1d' sample-id.txt
+awk '$1 ~ /_1.fastq.gz/' file_list.tsv | cut -d$'\t' -f1 > forward.txt
+
+while read line; do 
+	echo "$PWD/$line" >> forward-absolute-filepath.txt
+done < forward.txt
+	
+rm forward.txt
+
+awk '$1 ~ /_2.fastq.gz/' file_list.tsv | cut -d$'\t' -f1 > reverse.txt
+	
+while read line; do 
+echo "$PWD/$line" >> reverse-absolute-filepath.txt
+done < reverse.txt
+
+rm reverse.txt
+
+echo -e "sample-id\tforward-absolute-filepath\treverse-absolute-filepath" > manifest_file.txt
+paste sample-id.txt forward-absolute-filepath.txt reverse-absolute-filepath.txt >> manifest_file.txt	
+	
+rm forward-absolute-filepath.txt reverse-absolute-filepath.txt
+	
+cp manifest_file.txt /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/
+
+###2CU1_2 is named 2CUI_2 instead

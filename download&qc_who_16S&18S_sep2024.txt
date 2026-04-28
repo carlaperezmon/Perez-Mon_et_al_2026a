@@ -1,0 +1,66 @@
+######Analyses sequencing Sep 2024#########
+####Download sequences from Edinburgh genomics -> follow instructions from web & do QC ####
+
+qlogin -q staging
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/raw
+lftp transfer.genomics.ed.ac.uk <<<'login anonymous lftp@ ; mirror 459g4iLFchvyDRGO8rGQel6JgvftO7uq .'
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/raw/32800_Ogden_Rob/raw_data/20240902/
+
+#download was done for all sequences in run, including water simulated, so move those to water simulated folder
+
+
+
+##Quality control of sequences with fastqc -> might skip since I do not know how reliable is this for double marker with same barcode...
+
+qlogin -l h_vmem=16G
+
+module load igmm/apps/FastQC/0.11.9
+
+#create quality files for forward and reverse reads separately
+
+zcat */*1.fastq.gz | fastqc stdin:allforward_fastqc 
+zcat */*2.fastq.gz | fastqc stdin:allreverse_fastqc
+
+
+##Create manifiest file for qiime
+
+#select who samples from the list of names in metadata file
+
+awk -F'\t' '{print $12}'  /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/metadata_who_falsified.txt> names.txt
+sed -i '1d' names.txt
+
+awk -F'\t' 'NR==FNR { list[$1]; next } $8 in list' names.txt file_list.tsv > file_list_subset.tsv
+grep -F -f names.txt file_list.tsv > file_list_subset.tsv
+grep -wFf names.txt file_list.tsv > file_list_subset.tsv
+cat names.txt | xargs -I % grep '^%\s' file_list.tsv 
+
+#the above wasnt working so I did the subset manually for now
+
+awk -F'\t' '{print $9}' file_list_subset_who.txt | uniq > sample-id.txt
+sed -i '1d' sample-id.txt
+awk '$1 ~ /_1.fastq.gz/' file_list_subset_who.txt | cut -d$'\t' -f1 > forward.txt
+
+while read line; do 
+	echo "$PWD/$line" >> forward-absolute-filepath.txt
+done < forward.txt
+	
+rm forward.txt
+
+awk '$1 ~ /_2.fastq.gz/' file_list_subset_who.txt | cut -d$'\t' -f1 > reverse.txt
+	
+while read line; do 
+echo "$PWD/$line" >> reverse-absolute-filepath.txt
+done < reverse.txt
+
+rm reverse.txt
+
+echo -e "sample-id\tforward-absolute-filepath\treverse-absolute-filepath" > manifest_file.txt
+paste sample-id.txt forward-absolute-filepath.txt reverse-absolute-filepath.txt >> manifest_file.txt	
+	
+rm forward-absolute-filepath.txt reverse-absolute-filepath.txt
+	
+cp manifest_file.txt /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/
+

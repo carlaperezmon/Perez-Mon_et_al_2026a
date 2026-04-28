@@ -1,0 +1,34 @@
+#### BLASTING 18S SEQUENCES AGAINST PR2 DB ####
+
+##connect to Eddie, load Qiime and change to working directory
+qlogin -l h_vmem=32G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load mamba
+mamba activate qiime2-amplicon-2024.2
+
+##### do for deseq selected fasta ########
+
+initial_directory="/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/merged_and_clustered_runs/18S"
+
+cd $initial_directory
+
+##### do for all fasta, not only the deseq selected ones ########
+
+db_for_blast=("/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2_ref-seqs.qza")
+db_name=("PR2")
+
+maxmatch=(194141) #I wrote the maximum number of hits per database so that it includes all hits above the p_ident and cover thresholds
+per_ident=0.90  #input the percentage identity values for the blasting. Until I have a better notion of what percentage is better, I leave these parameters. i can always restring a threshold later in R analyses
+query_cover=0.90 #input the query coverage value for the blasting
+
+#### blasting ###### 
+	
+qiime feature-classifier blast \--i-query rep-seqs_clustered_18S.qza \--i-reference-reads /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2_ref-seqs.qza \--p-maxaccepts 194141 \--p-perc-identity 0.9 \--p-query-cov 0.9 \--o-search-results blast_18S_pe0.9_qc0.9_PR2.qza  ##used default parameters: --p-strand "both" and --p-evalue 0.001
+
+qiime tools export \--input-path blast_18S_pe0.9_qc0.9_PR2.qza \--output-path blast_18S_pe0.9_qc0.9_PR2_export
+
+
+

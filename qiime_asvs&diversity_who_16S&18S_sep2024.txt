@@ -1,0 +1,252 @@
+######Analyses sequencing April 2025#########
+####Processs sequences with Qiime and taxa classification with classifiers####
+##example script: https://github.com/julianzaugg/Example_qiime2/blob/main/example_qiime2.sh ##
+
+##connect to Eddie, load Qiime and change to working directory
+
+screen
+
+qlogin -l h_vmem=32G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load mamba
+mamba activate qiime2-amplicon-2024.2 #qiime updated
+
+main_dir='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/'
+
+cd $main_dir
+
+##create demux files for each sample that includes both markers
+
+	qiime tools import \
+		--type 'SampleData[PairedEndSequencesWithQuality]' \
+		--input-path manifest_file.txt \
+		--input-format PairedEndFastqManifestPhred33V2 \
+		--output-path demux.qza
+
+
+#### CHOOSE PARAMETERS FOR EACH GROUP ####
+
+marker_names=('16S' '18S')
+
+primer_forward=('GTGCCAGCMGCCGCGGTAA' 'GTACACACCGCCCGTC')
+primer_reverse=('GGACTACHVGGGTWTCTAAT' 'CCTTCYGCAGGTTCACCTAC')
+
+trim_f=(0 0 0)  # choose length of primers!
+trim_r=(0 0 0)
+len_f=(150 170) #very good sequence quality, but keep it with these metrics for now to match previous run
+len_r=(150 150) #very good sequence quality, but keep it with these metrics for now to match previous run
+
+sampling_depth=(1000 10000)
+sampling_depth_cf=(1000 10000)
+
+classifier=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/prok/provided_by_qiime/silva-138-99-515-806-nb-classifier.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/silva_qiime/18S_V9_SILVA_classifier_010923.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/plant/ncbi_trnl/final_filesforqiime/classifier_160523/trnl-NCBI-classifier-160523.qza')
+
+
+##### RUN THE QIIME PIPELINE FOR EACH MARKER ####
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+    
+qiime cutadapt trim-paired \
+	--i-demultiplexed-sequences demux.qza \
+	--p-front-f ${primer_forward[i]} \
+	--p-front-r ${primer_reverse[i]} \
+	--p-match-adapter-wildcards \
+	--p-discard-untrimmed \
+	--verbose \
+	--o-trimmed-sequences demux_trimmed_${marker_names[i]}.qza
+
+qiime demux summarize \
+  --i-data demux_trimmed_${marker_names[i]}.qza \
+  --o-visualization demux_trimmed_${marker_names[i]}.qzv
+
+done
+
+
+
+#inspect the demux trimmed file and choose trimming parameters
+
+for ((i=0; i<${#marker_names[@]}; i++)) 
+do
+   
+qiime dada2 denoise-paired \
+	--i-demultiplexed-seqs demux_trimmed_${marker_names[i]}.qza \
+	--p-trim-left-f  ${trim_f[i]} \
+	--p-trim-left-r  ${trim_r[i]} \
+	--p-trunc-len-f ${len_f} \
+	--p-trunc-len-r ${len_r} \
+	--p-n-threads 0 \
+	--o-representative-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+	--o-table table-dada2_${marker_names[i]}.qza \
+	--o-denoising-stats stats-dada2_${marker_names[i]}.qza \
+	--verbose
+
+qiime metadata tabulate \
+  --m-input-file stats-dada2_${marker_names[i]}.qza \
+  --o-visualization stats-dada2_${marker_names[i]}.qzv
+
+qiime feature-table summarize \
+  --i-table table-dada2_${marker_names[i]}.qza \
+  --o-visualization table-dada2_${marker_names[i]}.qzv \
+  --m-sample-metadata-file metadata_who_falsified.txt
+
+qiime feature-table summarize \
+  --i-table table-dada2_${marker_names[i]}.qza \
+  --o-visualization table-dada2_${marker_names[i]}.qzv \
+  --m-sample-metadata-file metadata_who_falsified.txt
+
+mkdir ./${marker_names[i]}/${len_f[i]}_${len_r[i]} #create directory
+mv *rep* ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+mv *table* ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+mv *stats* ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+
+done
+
+
+mkdir ${len_f[i]}_${len_r[i]} #create directory
+mv *rep* ${len_f[i]}_${len_r[i]}
+mv *table* ${len_f[i]}_${len_r[i]}
+mv *stats* ${len_f[i]}_${len_r[i]}
+
+### try distinct trimming parameters: 110_110, 130_130, 150_150, 170_150, in the end seems like 170_150 would work better...
+
+
+##Phylogeny and diversity visualization
+
+##Including controls
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+	pwd
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+  --o-alignment aligned-rep-seqs-dada2.qza \
+  --o-masked-alignment masked-aligned-rep-seqs-dada2.qza \
+  --o-tree unrooted-tree-dada2.qza \
+  --o-rooted-tree rooted-tree-dada2.qza
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree-dada2.qza \
+  --i-table table-dada2_${marker_names[i]}.qza \
+  --p-sampling-depth ${sampling_depth[i]} \
+  --m-metadata-file ../../metadata_who_falsified.txt \
+  --output-dir core-metrics-results_sdepth${sampling_depth[i]}
+ 
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/
+
+done 
+
+
+##Excluding controls
+
+#filter out ASV present in negative controls -> through qiime
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+	pwd
+
+qiime feature-table filter-features \
+	--i-table table-dada2_${marker_names[i]}.qza \
+	--m-metadata-file ../../metadata_who_falsified.txt \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-table table_cf1.qza
+	
+	
+#filter out negative control samples
+qiime feature-table filter-samples \
+	--i-table table_cf1.qza \
+	--m-metadata-file ../../metadata_who_falsified.txt \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-table table_cf2.qza
+
+
+qiime feature-table summarize \
+  --i-table table_cf2.qza \
+  --o-visualization table_cf2.qzv \
+  --m-sample-metadata-file ../../metadata_who_falsified.txt
+
+
+#filter out sequences from controls in rep-seq file 
+qiime feature-table filter-seqs \
+	--i-data rep-seqs-dada2_${marker_names[i]}.qza \
+	--m-metadata-file ../../metadata_who_falsified.txt \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-data rep-seqs_cf.qza
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs_cf.qza \
+  --o-alignment aligned-rep-seqs_cf.qza \
+  --o-masked-alignment masked-aligned-rep-seqs_cf.qza \
+  --o-tree unrooted-tree_cf.qza \
+  --o-rooted-tree rooted-tree_cf.qza
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree_cf.qza \
+  --i-table table_cf2.qza \
+  --p-sampling-depth ${sampling_depth_cf[i]} \
+  --m-metadata-file ../../metadata_who_falsified.txt \
+  --output-dir core-metrics-results_sdepth${sampling_depth_cf[i]}_cf
+  
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/
+
+done 
+
+
+###### Species annotation #######
+
+marker_names2=('16S' '18S')
+
+classifier=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/bacteria/provided_by_qiime/silva-138-99-515-806-nb-classifier.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/silva_qiime/18S_V9_SILVA_classifier_010923.qza')
+names_db=('silva' 'silva')
+
+classifier2=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/bacteria/provided_by_qiime/gg_2022_10_backbone.v4.nb.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2-full-seqs-classifier-070923.qza')
+names_db2=('gg' 'pr2')
+
+for ((i=0; i<${#marker_names2[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+
+cd ${marker_names2[i]}/${len_f[i]}_${len_r[i]}
+
+#run for Silva
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier[i]} \
+  --i-reads rep-seqs-dada2_${marker_names2[i]}.qza \
+  --o-classification taxonomy_dada2_${marker_names2[i]}_${names_db[i]}.qza
+
+qiime taxa barplot \
+  --i-table table-dada2_${marker_names2[i]}.qza \
+  --i-taxonomy taxonomy_dada2_${marker_names2[i]}_${names_db[i]}.qza \
+  --m-metadata-file ../../metadata_simulated_waters.txt \
+  --o-visualization taxa-bar-plots_${marker_names2[i]}_${names_db[i]}.qzv
+
+
+#run for gg and pr2
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier2[i]} \
+  --i-reads rep-seqs-dada2_${marker_names2[i]}.qza \
+  --o-classification taxonomy_dada2_${marker_names2[i]}_${names_db2[i]}.qza
+
+
+qiime taxa barplot \
+  --i-table table-dada2_${marker_names2[i]}.qza \
+  --i-taxonomy taxonomy_dada2_${marker_names2[i]}_${names_db2[i]}.qza \
+  --m-metadata-file ../../metadata_simulated_waters.txt \
+  --o-visualization taxa-bar-plots_${marker_names2[i]}_${names_db2[i]}.qzv
+
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/water_simulated_september_2024
+
+done
+
+
+
+

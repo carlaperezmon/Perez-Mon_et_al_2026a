@@ -1,0 +1,39 @@
+######Analyses sequencing trnl 2026#########
+
+qlogin -q staging
+
+## fastq files copied manually from all the downloaded data ###
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_trnl_nov2025/raw
+
+files_R1=(*R1*.fastq.gz)
+files_R2=(*R2*.fastq.gz)
+
+for name in "${files_R1[@]}"; do
+    echo "$name"
+done
+
+for name in "${files_R2[@]}"; do
+    echo "$name"
+done
+
+for name in "${files_R1[@]}"; do
+    echo "${name%%_*}" 
+done > sample-id.txt
+
+for name in "${files_R1[@]}"; do
+    echo "$PWD/$name" 
+done > forward-absolute-filepath.txt
+
+for name in "${files_R2[@]}"; do
+    echo "$PWD/$name" 
+done > reverse-absolute-filepath.txt
+
+echo -e "sample-id\tforward-absolute-filepath\treverse-absolute-filepath" > ../manifest_file.txt
+
+paste sample-id.txt forward-absolute-filepath.txt reverse-absolute-filepath.txt >> ../manifest_file.txt
+
+
+
+
+

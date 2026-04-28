@@ -1,0 +1,200 @@
+######Analyses sequencing April 2025#########
+####Processs sequences with Qiime and taxa classification with classifiers####
+##example script: https://github.com/julianzaugg/Example_qiime2/blob/main/example_qiime2.sh ##
+
+#connect to Eddie, load Qiime and change to working directory
+qlogin -l h_vmem=32G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load mamba
+mamba activate qiime2-amplicon-2024.2 #qiime updated
+
+##### merge with previous run from sept 2024, merged with previous A5J3 ########
+
+metadata_file='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/metadata_who_falsified_shorten.txt'
+marker_names=('16S' '18S')
+
+merged_dir='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/merged_and_clustered_runs'
+cd $merged_dir
+
+tables_sep=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/16S/170_150/merged_A5J3/table-dada2_16S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/18S/170_150/table-dada2_18S.qza')
+tables_apr=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/16S/150_150/table-dada2_16S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/18S/170_150/table-dada2_18S.qza'
+
+seqs_sep=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/16S/170_150/merged_A5J3/rep-seqs-dada2_16S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/18S/170_150/rep-seqs-dada2_18S.qza')
+seqs_apr=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/16S/150_150/rep-seqs-dada2_16S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/18S/170_150/rep-seqs-dada2_18S.qza')
+
+mkdir 16S 18S
+
+for ((i=0; i<${#marker_names[@]}; i++)) 
+do
+
+cd ${marker_names[i]}
+
+qiime feature-table merge \
+    --i-tables   ${tables_sep[i]}  ${tables_apr[i]} \
+    --o-merged-table table-dada2_merged_${marker_names[i]}.qza
+
+qiime feature-table merge-seqs \
+  --i-data  ${seqs_sep[i]}  ${seqs_apr[i]}\
+  --o-merged-data rep-seqs-dada2_merged_${marker_names[i]}.qza
+
+cd $merged_dir
+
+done 
+
+#somehow the above merging didnt work so I had to do it manually
+
+i=0
+cd ${marker_names[i]}
+
+qiime feature-table merge \
+    --i-tables  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/16S/170_150/merged_A5J3/table-dada2_16S.qza'  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/16S/170_150/table-dada2_16S.qza' \
+    --o-merged-table table-dada2_merged_${marker_names[i]}.qza
+
+qiime feature-table merge-seqs \
+  --i-data  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/16S/170_150/merged_A5J3/rep-seqs-dada2_16S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/16S/170_150/rep-seqs-dada2_16S.qza' \
+  --o-merged-data rep-seqs-dada2_merged_${marker_names[i]}.qza
+
+cd $merged_dir
+
+i=1
+
+cd ${marker_names[i]}
+
+qiime feature-table merge \
+    --i-tables  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/18S/170_150/table-dada2_18S.qza'  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/18S/170_150/table-dada2_18S.qza' \
+    --o-merged-table table-dada2_merged_${marker_names[i]}.qza
+
+qiime feature-table merge-seqs \
+  --i-data  '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_september_2024/18S/170_150/rep-seqs-dada2_18S.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/18S/170_150/rep-seqs-dada2_18S.qza' \
+  --o-merged-data rep-seqs-dada2_merged_${marker_names[i]}.qza
+
+cd $merged_dir
+
+
+
+
+##### cluster the sequences to reduce seq batch effects ######
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+
+cd ${marker_names[i]}
+
+qiime vsearch cluster-features-de-novo \
+--i-sequences rep-seqs-dada2_merged_${marker_names[i]}.qza \
+--i-table table-dada2_merged_${marker_names[i]}.qza \
+--p-perc-identity 0.99 \
+--o-clustered-sequences rep-seqs_clustered_${marker_names[i]}.qza \
+--o-clustered-table table_clustered_${marker_names[i]}.qza \
+--verbose
+
+cd $merged_dir
+
+done
+
+
+#check ordination in clustered sequences
+
+sampling_depth=(5000 5000)
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ${marker_names[i]}
+	pwd
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs_clustered_${marker_names[i]}.qza \
+  --o-alignment aligned-rep-seqs-dada2.qza \
+  --o-masked-alignment masked-aligned-rep-seqs-dada2.qza \
+  --o-tree unrooted-tree-dada2.qza \
+  --o-rooted-tree rooted-tree-dada2.qza
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree-dada2.qza \
+  --i-table table_clustered_${marker_names[i]}.qza \
+  --p-sampling-depth ${sampling_depth[i]} \
+  --m-metadata-file $metadata_file \
+  --p-ignore-missing-samples \
+  --output-dir core-metrics-results_clustered_sdepth${sampling_depth[i]}
+ 
+cd $merged_dir
+
+done 
+
+
+
+###### Species annotation #######
+
+classifier=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/bacteria/provided_by_qiime/silva-138-99-515-806-nb-classifier.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/silva_qiime/18S_V9_SILVA_classifier_010923.qza')
+names_db=('silva' 'silva')
+
+classifier2=('/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/bacteria/provided_by_qiime/gg_2022_10_backbone.v4.nb.qza' '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2-full-seqs-classifier-070923.qza')
+names_db2=('gg' 'pr2')
+
+#for merged
+
+cd $merged_dir
+
+for ((i=0; i<${#marker_names2[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+
+cd ${marker_names[i]}
+
+#run for Silva
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier[i]} \
+  --i-reads rep-seqs-dada2_merged_${marker_names[i]}.qza \
+  --o-classification taxonomy_dada2_merged_${marker_names[i]}_${names_db[i]}.qza
+
+#run for gg and pr2
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier2[i]} \
+  --i-reads rep-seqs-dada2_merged_${marker_names[i]}.qza \
+  --o-classification taxonomy_dada2_merged_${marker_names[i]}_${names_db2[i]}.qza
+
+cd $merged_dir
+
+done
+
+
+
+#for clustered
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+
+cd ${marker_names[i]}
+
+#run for Silva
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier[i]} \
+  --i-reads rep-seqs_clustered_${marker_names[i]}.qza \
+  --o-classification taxonomy_dada2_clustered_${marker_names[i]}_${names_db[i]}.qza
+
+#run for gg and pr2
+qiime feature-classifier classify-sklearn \
+  --i-classifier ${classifier2[i]} \
+  --i-reads rep-seqs_clustered_${marker_names[i]}.qza \
+  --o-classification taxonomy_dada2_clustered_${marker_names[i]}_${names_db2[i]}.qza
+
+cd $merged_dir
+
+done
+
+
+###checking for separated sets and they both cluster
+
+qiime vsearch cluster-features-de-novo \
+--i-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+--i-table table-dada2_${marker_names[i]}.qza \
+--p-perc-identity 0.99 \
+--o-clustered-sequences rep-seqs_clustered_${marker_names[i]}.qza \
+--o-clustered-table table_clustered_${marker_names[i]}.qza \
+--verbose
+
+
+
+/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/merged_and_clustered_runs

@@ -1,0 +1,149 @@
+######Analyses sequencing April 2025#########
+####Processs sequences with Qiime and taxa classification with classifiers####
+##example script: https://github.com/julianzaugg/Example_qiime2/blob/main/example_qiime2.sh ##
+
+##connect to Eddie, load Qiime and change to working directory
+
+screen
+
+qlogin -l h_vmem=32G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load mamba
+mamba activate qiime2-amplicon-2024.2 #qiime updated
+
+main_dir='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/'
+
+cd $main_dir
+
+##create demux files for each sample that includes both markers
+
+	qiime tools import \
+		--type 'SampleData[PairedEndSequencesWithQuality]' \
+		--input-path manifest_file.txt \
+		--input-format PairedEndFastqManifestPhred33V2 \
+		--output-path demux.qza
+
+
+#### CHOOSE PARAMETERS FOR EACH GROUP ####
+
+metadata_file='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_april_2025/metadata_who_falsified_shorten.txt'
+
+marker_names=('16S' '18S')
+
+primer_forward=('GTGCCAGCMGCCGCGGTAA' 'GTACACACCGCCCGTC')
+primer_reverse=('GGACTACHVGGGTWTCTAAT' 'CCTTCYGCAGGTTCACCTAC')
+
+trim_f=(0 0 0)  # choose length of primers!
+trim_r=(0 0 0)
+len_f=(170 170) #very good sequence quality, but keep it with these metrics for now to match previous run. Otherwise it would probably go for 220f 220r for 16S and 190 150 for 18S
+len_r=(150 150) 
+
+#### for bacteria try less trimming for merging see if result improves ######
+
+len_f=(220) #very good sequence quality, but keep it with these metrics for now to match previous run. Otherwise it would probably go for 220f 220r for 16S and 190 150 for 18S
+len_r=(220) 
+
+sampling_depth=(10000 10000)
+sampling_depth_cf=(10000 10000)
+
+mkdir 16S 18S
+
+##### RUN THE QIIME PIPELINE FOR EACH MARKER ####
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+    
+qiime cutadapt trim-paired \
+	--i-demultiplexed-sequences demux.qza \
+	--p-front-f ${primer_forward[i]} \
+	--p-front-r ${primer_reverse[i]} \
+	--p-match-adapter-wildcards \
+	--p-discard-untrimmed \
+	--verbose \
+	--o-trimmed-sequences demux_trimmed_${marker_names[i]}.qza
+
+qiime demux summarize \
+  --i-data demux_trimmed_${marker_names[i]}.qza \
+  --o-visualization demux_trimmed_${marker_names[i]}.qzv
+
+done
+
+mv *_16S* 16S/
+mv *_18S* 18S/
+
+
+#inspect the demux trimmed file and choose trimming parameters
+
+for ((i=0; i<${#marker_names[@]}; i++)) 
+do
+   cd ./${marker_names[i]}/ 
+   
+qiime dada2 denoise-paired \
+	--i-demultiplexed-seqs demux_trimmed_${marker_names[i]}.qza \
+	--p-trim-left-f  ${trim_f[i]} \
+	--p-trim-left-r  ${trim_r[i]} \
+	--p-trunc-len-f ${len_f} \
+	--p-trunc-len-r ${len_r} \
+	--p-n-threads 0 \
+	--o-representative-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+	--o-table table-dada2_${marker_names[i]}.qza \
+	--o-denoising-stats stats-dada2_${marker_names[i]}.qza \
+	--verbose
+
+qiime metadata tabulate \
+  --m-input-file stats-dada2_${marker_names[i]}.qza \
+  --o-visualization stats-dada2_${marker_names[i]}.qzv
+
+mkdir -p ${len_f[i]}_${len_r[i]} #create directory
+mv *rep* ./${len_f[i]}_${len_r[i]}
+mv *table* ./${len_f[i]}_${len_r[i]}
+mv *stats* ./${len_f[i]}_${len_r[i]}
+
+cd $main_dir
+
+done
+
+
+##Phylogeny and diversity visualization
+
+##Including controls
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+	pwd
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+  --o-alignment aligned-rep-seqs-dada2.qza \
+  --o-masked-alignment masked-aligned-rep-seqs-dada2.qza \
+  --o-tree unrooted-tree-dada2.qza \
+  --o-rooted-tree rooted-tree-dada2.qza
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree-dada2.qza \
+  --i-table table-dada2_${marker_names[i]}.qza \
+  --p-sampling-depth ${sampling_depth[i]} \
+  --m-metadata-file $metadata_file \
+  --p-ignore-missing-samples \
+  --output-dir core-metrics-results_sdepth${sampling_depth[i]}
+ 
+cd $main_dir
+
+done 
+
+
+
+
+
+
+
+
+
+
+
+
+

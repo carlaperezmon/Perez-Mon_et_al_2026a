@@ -1,0 +1,195 @@
+######Analyses sequencing who trnl 2026#########
+####Processs sequences with Qiime and taxa classification with classifiers####
+##example script: https://github.com/julianzaugg/Example_qiime2/blob/main/example_qiime2.sh ##
+## I forgot to remove trnl raw reads samples so the code is a bit more chunkier than it should ####
+
+
+##connect to Eddie, load Qiime and change to working directory
+
+qlogin -l h_vmem=64G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm/temp"
+
+###Not working for now so just use 2024 version  
+  
+module load mamba
+mamba activate qiime2-amplicon-2024.2 #qiime updated
+
+main_dir='/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_trnl_nov2025/'
+
+cd $main_dir
+
+##create demux files for each sample that includes both markers
+
+qiime tools import \--type 'SampleData[PairedEndSequencesWithQuality]' \--input-path manifest_file.txt \--input-format PairedEndFastqManifestPhred33V2 \--output-path demux.qza
+
+qiime demux summarize \--i-data demux.qza \--o-visualization demux.qzv
+
+#### CHOOSE PARAMETERS FOR EACH GROUP ####
+
+marker_names=('trnl')
+
+primer_forward=('CGAAATCGGTAGACGCTACG')
+primer_reverse=('CCATTGAGTCTCTGCACCTATC')
+
+trim_f=(0 0 0)  # choose length of primers!
+trim_r=(0 0 0)
+len_f=(120) #very good sequence quality, but keep it with these metrics for now to match previous run
+len_r=(100) #try same trimming as for WHO because results trying 170 190 were weird
+
+sampling_depth=(10000)
+sampling_depth_cf=(10000)
+
+metadata=('metadata_who_trnl.txt')
+
+##### RUN THE QIIME PIPELINE FOR EACH MARKER ####
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+    
+qiime cutadapt trim-paired \
+	--i-demultiplexed-sequences demux.qza \
+	--p-front-f ${primer_forward[i]} \
+	--p-front-r ${primer_reverse[i]} \
+	--p-match-adapter-wildcards \
+	--p-discard-untrimmed \
+	--verbose \
+	--o-trimmed-sequences demux_trimmed_${marker_names[i]}.qza
+
+qiime demux summarize \
+  --i-data demux_trimmed_${marker_names[i]}.qza \
+  --o-visualization demux_trimmed_${marker_names[i]}.qzv
+
+done
+
+
+#inspect the demux trimmed file and choose trimming parameters
+
+for ((i=0; i<${#marker_names[@]}; i++)) 
+do
+   
+qiime dada2 denoise-paired \
+	--i-demultiplexed-seqs demux_trimmed_${marker_names[i]}.qza \
+	--p-trim-left-f  ${trim_f[i]} \
+	--p-trim-left-r  ${trim_r[i]} \
+	--p-trunc-len-f ${len_f} \
+	--p-trunc-len-r ${len_r} \
+	--p-n-threads 0 \
+	--o-representative-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+	--o-table table-dada2_${marker_names[i]}.qza \
+	--o-denoising-stats stats-dada2_${marker_names[i]}.qza \
+	--verbose
+
+qiime metadata tabulate \
+  --m-input-file stats-dada2_${marker_names[i]}.qza \
+  --o-visualization stats-dada2_${marker_names[i]}.qzv
+
+mkdir ${marker_names[i]}/${len_f[i]}_${len_r[i]} #create directory
+mv *${marker_names[i]}* ${marker_names[i]}/${len_f[i]}_${len_r[i]}
+done
+
+
+
+##Phylogeny and diversity visualization
+
+##Including controls
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+	pwd
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs-dada2_${marker_names[i]}.qza \
+  --o-alignment aligned-rep-seqs-dada2.qza \
+  --o-masked-alignment masked-aligned-rep-seqs-dada2.qza \
+  --o-tree unrooted-tree-dada2.qza \
+  --o-rooted-tree rooted-tree-dada2.qza
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree-dada2.qza \
+  --i-table table-dada2_${marker_names[i]}.qza \
+  --p-sampling-depth ${sampling_depth[i]} \
+  --m-metadata-file $metadata \
+  --output-dir core-metrics-results_sdepth${sampling_depth[i]}
+ 
+cd $main_dir
+
+done 
+
+
+##Excluding controls
+
+#filter out ASV present in negative controls -> through qiime
+
+for ((i=0; i<${#marker_names[@]}; i++)) #to loop through the length of array directories (same for tablets below). helped by chatgpt :). 
+do
+	cd ./${marker_names[i]}/${len_f[i]}_${len_r[i]}
+	pwd
+
+qiime feature-table filter-features \
+	--i-table table-dada2_${marker_names[i]}.qza \
+	--m-metadata-file $metadata \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-table table_cf1.qza
+	
+	
+#filter out negative control samples
+qiime feature-table filter-samples \
+	--i-table table_cf1.qza \
+	--m-metadata-file $metadata \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-table table_cf2.qza
+
+
+qiime feature-table summarize \
+  --i-table table_cf2.qza \
+  --o-visualization table_cf2.qzv \
+  --m-sample-metadata-file $metadata
+
+
+#filter out sequences from controls in rep-seq file 
+qiime feature-table filter-seqs \
+	--i-data rep-seqs-dada2_${marker_names[i]}.qza \
+	--m-metadata-file $metadata \
+	--p-where "[material]='control'" \
+	--p-exclude-ids \
+	--o-filtered-data rep-seqs_cf.qza
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs_cf.qza \
+  --o-alignment aligned-rep-seqs_cf.qza \
+  --o-masked-alignment masked-aligned-rep-seqs_cf.qza \
+  --o-tree unrooted-tree_cf.qza \
+  --o-rooted-tree rooted-tree_cf.qza
+
+ls
+ 
+
+
+###### Species annotation #######
+
+#classification using classifier
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/who_trnl_nov2025/trnl/140_120/
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier '/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/plant/ncbi_trnl/final_filesforqiime/classifier_160523/trnl-NCBI-classifier-160523.qza' \
+  --i-reads rep-seqs-dada2_trnl.qza \
+  --o-classification taxonomy_dada2_trnl.qza
+
+qiime taxa barplot \
+  --i-table table-dada2_trnl.qza \
+  --i-taxonomy taxonomy_dada2_trnl.qza \
+  --m-metadata-file $metadata \
+  --o-visualization taxa-bar-plots_trnl.qzv
+
+#blastering
+qiime feature-classifier blast \--i-query rep-seqs-dada2_trnl.qza \--i-reference-reads "/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/plant/ncbi_trnl/final_filesforqiime/trnl-NCBI-otus_filt.qza" \--p-maxaccepts 225456 \--p-perc-identity 0.9 \--p-query-cov 0.9 \--o-search-results blast_trnl_pe0.9_qc0.9_NCBI.qza  ##used default parameters: --p-strand "both" and --p-evalue 0.001
+
+qiime tools export \--input-path blast_trnl_pe0.9_qc0.9_NCBI.qza \--output-path blast_trnl_pe0.9_qc0.9_NCBI_export
+
+
