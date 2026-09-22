@@ -1,11 +1,11 @@
 
 ### SET WORKING DIRECTORY, LOAD PACKAGES AND METADATA ------
 
-path_work="M:/postdoc_2021/sequencing_results/data_analyses/2024-2025_who/clustered_runs"
+path_work="C:/Users/User/Desktop/who_cluster_stability"
 
 setwd(path_work)
 
-load("../1_diversity_and_ordination_analyses_refined_hist.RData")
+load("1_diversity_and_ordination_analyses_refined_hist.RData")
 
 
 ### LOAD PACKAGES, WORKING PATHS AND METADATA ------
@@ -36,7 +36,7 @@ packages <- c("ggplot2","openxlsx","reshape2","qiime2R","Rmisc",
               'rnaturalearth','rnaturalearthdata','ggspatial','pROC',
               'gridGraphics','ggordiplots','bios2mds','ggrepel',
               'RColorBrewer','lubridate','paletteer','MASS','ggord','scales',
-              'gridExtra','patchwork','lubridate','colorspace')
+              'gridExtra','patchwork','lubridate','colorspace','fpc')
 
 ipak(packages)
 
@@ -430,6 +430,11 @@ group_W16=na.omit(metadata$sample.id[metadata$lot_id3=='W16'])
 #cut values
 cut_vals_all=c(0.865,0.92)
 
+#for cluster stability#
+
+clusters_methods=c('average','ward.D2','single','complete')
+
+
 ### stick to all samples rep #### 
 for (i in 1:length(marker)) {
   print(marker[i])
@@ -450,9 +455,7 @@ for (i in 1:length(marker)) {
     count1=count1[!rownames(count1) %in% group_W19,]
     
     if (marker[i]=='16S' & names[j]=='all') {
-    count1=count1[!rownames(count1) %in% group_W16,]} #otherwise too disperse
-    
-    if (marker[i]=='16S') {
+      count1=count1[!rownames(count1) %in% group_W16,] #otherwise too disperse
       count1=count1[!rownames(count1) %in% group_W22,] 
     }
     
@@ -582,34 +585,57 @@ for (i in 1:length(marker)) {
     
     ggsave(all_plots,filename=paste(mainDir,"/",subDir7,"/hca_lau_",names[j],'_',marker[i],".png", sep=""), width = 18, height = 10.5)
   
-    #evaluate cluster stability
     
-    library(fpc)
-
-    my_distance_matrix <- vegan::vegdist(my_asv_table, method = "bray")
+    #evaluate cluster stability ####
     
-    # 3. Define your pre-assigned clusters
-    # This must be a vector of numbers or characters matching the order of your matrix
-    my_already_assigned_clusters <- c(1, 1, 2, 2, 2, 3, 3) # Example vector
-    num_clusters <- length(unique(my_already_assigned_clusters))
+    dist.matrix2=as.matrix(dist.matrix)
     
-    # 4. Run clusterboot directly on the distance matrix
-    stability_test <- clusterboot(
-      my_distance_matrix,
-      B = 100,                     # Number of bootstrap resamples (use 500-1000 for final papers)
-      bootmethod = "boot",         # Standard bootstrap resampling
-      clustermethod = pamkCBI,     # PAM algorithm handles distance matrices perfectly
-      k = num_clusters,            # Number of pre-existing clusters you are testing
-      labels = names(my_already_assigned_clusters),
-      distances = TRUE,            # CRITICAL: Tells fpc that the input is a distance matrix
-      dissolution = 0.5,           # Threshold where a cluster is considered dissolved
-      count = FALSE
-    )
+    hca_clusters2=hca_clusters[colnames(dist.matrix2)]
+    num_clusters <- length(unique(hca_clusters2))
     
-    # 5. Look at the stability scores
-    # Look specifically for the "Cluster stability values" output line
-    print(stability_test)
-    jue, 1:57
+    cluster_jaccard_mean=list()
+    for (j in 1:length(clusters_methods)) {
+        stability_test <- clusterboot(
+        dist.matrix2,
+        B = 1000,                     # Number of bootstrap resamples (use 500-1000 for final papers)
+        clustermethod = hclustCBI,
+        method = clusters_methods[j],
+        k = num_clusters,            # Number of pre-existing clusters you are testing
+        distances = TRUE,            # CRITICAL: Tells fpc that the input is a distance matrix
+        dissolution = 0.5,           # Threshold where a cluster is considered dissolved -> this might need to change
+        count = FALSE,
+        seed = 123
+      )
+      
+      ##save mean jaccard in list
+      
+      mean_jaccard=stability_test$bootmean
+      names(mean_jaccard)=seq(1,num_clusters,1)
+      cluster_jaccard_mean[[j]]=mean_jaccard
+      
+      ## S3 method for class 'clboot'
+      sink(paste("cluster_stability_result_",marker[i],'_',clusters_methods[j],'.txt',sep=''), split = TRUE)
+      print('stability_test_result')
+      print(stability_test)
+      print('proportion of samples assigned to same groups as before -> should be ~1')
+      print(mclust::adjustedRandIndex(stability_test$partition, hca_clusters2))  # should be ~1
+      sink()
+      
+      #compare visually
+      
+      my_groups<- data.frame(name = names(hca_clusters2), my_groups = hca_clusters2)
+      clusterboot_groups <- data.frame(name = names(stability_test$partition), clusterboot_groups = stability_test$partition)
+      
+      check_stability=merge(my_groups, clusterboot_groups, by = "name", all = TRUE) # keep all names (full join)
+      
+      write.xlsx(check_stability,paste("stability_groups_comparison_",marker[i],'_',clusters_methods[j],'.xlsx',sep=''), rowNames = TRUE)
+    }
+    
+    names(cluster_jaccard_mean)=clusters_methods
+    all_methods_stability=do.call(cbind, cluster_jaccard_mean)# one column per vector
+    write.xlsx(all_methods_stability,paste("stability_clust_methods_comparison_",marker[i],'.xlsx',sep=''),rowNames = TRUE)
+    
+    #save objects
     
     assign(paste('hca_clusters',names[j],marker[i],sep='_'),cut_avg)
     assign(paste('hca_dend',names[j],marker[i],sep='_'),dend)
