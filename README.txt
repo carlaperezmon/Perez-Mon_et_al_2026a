@@ -2,3 +2,5 @@ Qiime and R scripts use for analyses and figures of manuscript 'Investigating th
 
 .txt -> Qiime scripts used to process the eDNA data. These include analyses for separated runs of 18S and 16S data (sep2024 and april2025, comprising different sets of samples as not all the samples could be acquired at the same time) and after merging and clustering ASVs and sequencing data (qiime_asv&diversity_sep2024&april2025_merged&clustered). The results of the clustered sequences are those included in the manuscript because the clustering was best at removing sequencing batch effects \
 .R -> R Scripts used for eDNA and chemo-isotopic analyses. These include eDNA diversity and taxa assignment, hierarchical clustering analyses (HCA) per analyses to infer sample groupings and representation of share group memberships across all analyses per pair of samples to infer sources and possible distribution routes\
+
+Folder dataset -> contains all data needed to reproduce the results when running the scripts
